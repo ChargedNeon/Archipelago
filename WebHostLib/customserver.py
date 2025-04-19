@@ -297,7 +297,7 @@ def run_server_process(name: str, ponyconfig: dict,
                     # If neither port allocation has been enabled, or room port overflows have been enabled,
                     # then raise the exception
                     if room_port_alloc_tries < 0 and room_port_overflow is False:
-                        ctx.logger.info(f"[{name}] Direct rethrow of exception as configuration disallows rethrows:")
+                        ctx.logger.debug("Failed to immediately aquire port number")
                         raise RoomPoolException() from start_oserr
 
                     # The port is in use.
@@ -311,17 +311,17 @@ def run_server_process(name: str, ponyconfig: dict,
                                     functools.partial(server, ctx=ctx), ctx.host, next_port, ssl=get_ssl_context())
                                 await ctx.server
                             except OSError as ose:
-                                ctx.logger.info(f"[{name}] Unable to allocate port {next_port}, trying next port \
+                                ctx.logger.debug(f"Unable to allocate port {next_port}, trying next port \
                                     (attempt {room_port_try+1} of {room_port_alloc_tries})...")
                                 last_oserr = ose
                                 continue
 
                         if last_oserr is not None and room_port_overflow is False:
-                            raise RoomPoolException(f"[{name}] Exhausted retries to allocate a port.") from last_oserr
+                            raise RoomPoolException("Exhausted retries to allocate a port.") from last_oserr
 
                     # If we still haven't been able to create a server, let `websockets` find a free port.
                     if room_port_overflow is True:
-                        ctx.logger.info(f'[{name}] Randomly-allocating system free port')
+                        ctx.logger.debug("Randomly-allocating system free port")
                         ctx.server = websockets.serve(functools.partial(server, ctx=ctx), ctx.host, 0,
                             ssl=get_ssl_context())
                         await ctx.server

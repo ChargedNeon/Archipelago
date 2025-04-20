@@ -272,7 +272,7 @@ def run_server_process(name: str, ponyconfig: dict,
 
     loop = asyncio.get_event_loop()
 
-    async def start_ws_server(ctx: WebHostContext, port: int) -> typing.Union[int, None]:
+    async def start_ws_server(ctx: WebHostContext, port: int) -> int | None:
         ctx.server = websockets.serve(
             functools.partial(server, ctx=ctx), ctx.host, port, ssl=get_ssl_context())
         await ctx.server
@@ -288,44 +288,44 @@ def run_server_process(name: str, ponyconfig: dict,
                 port = socketname[1]
         return port
 
+    async def start_room_server_rnd(ctx: WebHostContext) -> int | None:
+        attempts = 0
+        port: int | None = None
 
-    async def start_room_server(ctx: WebHostContext) -> typing.Union[int, None]:
-        # If this room has been marked as failed, don't try to obtain a port for the room.
-        if ctx.port == -1:
-            return None
+        allow_fallback: bool = room_ports_config["overflow"]
+        max_attempts: int = room_ports_config["max_attempts"]
 
-        port = None
-        try:
-            port = await start_ws_server(ctx, ctx.port)
-        except OSError as start_oserr: # The port is in use.
-            # If neither port allocation has been enabled, or room port overflows have been enabled,
-            # then raise the exception
-            if room_ports_config["alloc_tries"] < 0 and room_ports_config["overflow"] is False:
-                ctx.logger.debug("Failed to immediately acquire port number")
-                raise start_oserr
+        while port is None:
+            attempts += 1
+            if attempts > max_attempts:
+                if not allow_fallback:
+                    if e is None:
+                        return None
+                    else:
+                        raise e
+                else:
+                    port = 0
+            else:
+                port = get_random_port(room_ports_config)
 
-            # If the webserver has been configured to retry for ports, brute-force retry:
-            if room_ports_config["alloc_tries"] > -1:
-                last_oserr = None
-                for room_port_try in range(0, room_ports_config["alloc_tries"]):
-                    next_port = get_random_port(room_ports_config)
-                    try:
-                        port = await start_ws_server(ctx, next_port)
-                    except OSError as ose:
-                        ctx.logger.debug(f"Unable to allocate port {next_port}, trying next port \
-(attempt {room_port_try+1} of {room_ports_config['alloc_tries']})...")
-                        last_oserr = ose
-                        continue
-
-                if last_oserr is not None and room_ports_config["overflow"] is False:
-                    raise last_oserr
-
-            # If we still haven't been able to create a server, let `websockets` find a free port.
-            if room_ports_config["overflow"] is True:
-                ctx.logger.debug("Randomly-allocating system free port")
-                port = await start_ws_server(ctx, 0)
+            try:
+                port = await start_ws_server(ctx, port)
+            except OSError as e:
+                if port == 0:
+                    raise
+                port = None
         return port
 
+    async def start_room_server(ctx: WebHostContext) -> int | None:
+        # Prevent marked-as-broken rooms from trying to obtain another port.
+        if ctx.port < 0:
+            return None
+
+        try:
+            port = await start_ws_server(ctx, ctx.port)
+        except OSError as start_oserr:
+            port = await start_room_server_rnd(ctx)
+        return port
 
     async def start_room(room_id):
         with Locker(f"RoomLocker {room_id}"):
